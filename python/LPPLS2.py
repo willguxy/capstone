@@ -11,7 +11,7 @@ import tensorflow as tf
 import numpy as np
 import scipy as sp
 import plotly.offline as offline
-from plotly.graph_objs import Scatter
+from plotly.graph_objs import Layout, Contour
 
 np.seterr(all="raise")
 
@@ -35,18 +35,12 @@ class LPPLS_density():
         # * set up tensorflow computation graph
         # *********************************************
         
-        # set up variables in tensorflow's graph
-        # represent A, B, C1, C2, m, w respectively
-        params = tf.Variable([8.0, -.015, .001, .0005, .8, 9.0])
-        A, B, C1, C2, m, w = tf.split(params, 6)
-        
-        # damping parameter
-        self.D = m * tf.abs(B) / w / tf.sqrt(tf.pow(C1, 2) + tf.pow(C2, 2))  
-    
-        # we will suuply data to these two variables, hence use placeholder
+        # set up variables in tensorflow's graph        
+        self.params = tf.placeholder(tf.float32, shape=6)  # A, B, C1, C2, m, w respectively
         self.tc = tf.placeholder(dtype=tf.float32, shape=1, name="tc")
         self.t = tf.placeholder(dtype=tf.float32, shape=None, name="t")
         self.Pt = tf.placeholder(dtype=tf.float32, shape=None, name="Pt")
+        A, B, C1, C2, m, w = tf.split(self.params, 6)
     
         # the LPPLS formula
         def get_LPPLS(a, b, c1, c2, _m, _w, _tc, _t):
@@ -57,17 +51,8 @@ class LPPLS_density():
         
         LPPLS = get_LPPLS(A, B, C1, C2, m, w, self.tc, self.t)
                 
-        self.X = tf.gradients(LPPLS, params)  # formula (36) 
-        self.H = (tf.log(self.Pt) - LPPLS) * tf.hessians(LPPLS, params)  # formula (37)
-    
-        self.SSE = tf.reduce_mean( tf.pow(tf.log(self.Pt) - LPPLS, 2) )  # formula (9)
-    
-    
-        # *********************************************
-        # * use optimization to get MLEs
-        # *********************************************
-        optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
-        self.training_op = optimizer.minimize(self.SSE)
+        self.X = tf.gradients(LPPLS, self.params)  # formula (36) 
+        self.H = (tf.log(self.Pt) - LPPLS) * tf.hessians(LPPLS, self.params)  # formula (37)
     
         # initialize all variables defined above
         self.init_op = tf.global_variables_initializer()
@@ -91,19 +76,27 @@ class LPPLS_density():
                  tmp * np.sin(_w * np.log(np.abs(tc - t)))]
             
             X = np.vstack(X).T
-            beta = sp.matmul(sp.linalg.inv(sp.matmul(X.T, X)), sp.matmul(X.T, y))
-            SSE = np.sum(np.power(y - np.matmul(beta, X.T), 2))
+            try:
+                beta = sp.matmul(sp.linalg.inv(sp.matmul(X.T, X)), sp.matmul(X.T, y))
+            except:
+                print(X)
+                exit(1)
+                
+            SSE = np.mean(np.power(y - np.matmul(beta, X.T), 2))
             if flag:
                 return SSE, beta
             return SSE
     
         # multiple starting points to mitigate local extrema
-        ms = [.1, .5, .9]
-        ws = [4, 7, 10]
+        ms = [.15, .5, .85]
+        ws = [7.0, 9.5, 12.0]
         best_SSE = np.inf
         for m in ms:
             for w in ws:
-                res = sp.optimize.minimize(F1, x0=[m, w], method="Nelder-Mead", tol=1E-6)
+                res = sp.optimize.minimize(F1, x0=[m, w], 
+                                           bounds=((0.05, 0.95), (5.5, 13.5)),
+                                           method="L-BFGS-B", 
+                                           tol=1E-6)
                 if res.fun < best_SSE:
                     best_SSE = res.fun
                     params = res.x
@@ -127,31 +120,42 @@ class LPPLS_density():
         return res.fun, np.hstack([ABCCmw, res.x])
 
 
-    def get_density(self, prices):
+    def get_density(self, data):
         with tf.Session() as sess:
             sess.run(self.init_op)  # run initialization step
+            
+            timestamps, prices = data[:, 0], data[:, 1]            
             N = len(prices)
+            # plus 0.01 to avoid singularity when tc = t
+            crash_times = np.arange(timestamps[-1] - 50, timestamps[-1] + 150) + 0.01
+            
             print("------------------- ")
             print("Length:", N)
     
-            timestamps = np.arange(N) + 1
-            crash_times = np.arange(N-50, N+150) + 0.01  # plus 0.01 to avoid singularity when tc = t
+            # *********************************************
+            # * evaluate full MLEs
+            # *********************************************
+            s_tc_full, params = self.get_MLEs(timestamps, prices)
+            _, B, C1, C2, m, w, tc_full = params
+            D_full = m * np.abs(B) / w / np.sqrt(C1**2 + C2**2)
+            
+            # calculate full MLE gradients
+            X_full = []
+            for _t, _Pt in zip(timestamps, prices):
+                X_full.append( sess.run(self.X, feed_dict={self.t: _t,
+                                                           self.Pt: _Pt,
+                                                           self.tc: params[[-1]],
+                                                           self.params: params[:-1]}) )
+            X_full = np.squeeze(np.array(X_full))
+            print("A:{:.2f} | B:{:.2f} | C1:{:.4f} | C2:{:.4f} | m:{:.2f} | w:{:.2f} | tc:{:.1f}".format(*params))
+            print("D:{:.2f}".format(D_full, tc_full))
             
             # *********************************************
-            # * evaluate conditional MLEs on specific tc value
+            # * evaluate density value at each crash time point
             # *********************************************
-            SSE_min = np.inf
-            X_mat_holder, H_mat_holder, s_tc_holder = [], [], []
+            log_Lm = []            
             for i, crash_time in enumerate(crash_times):
-                # get MLEs
-                curr, prev = -1, 0
-                while abs(curr - prev) > 1E-6:
-                    prev = curr
-                    _, curr = sess.run([self.training_op, self.SSE], 
-                                       feed_dict={self.t: timestamps, 
-                                                  self.Pt: prices, 
-                                                  self.tc: [crash_time]})                
-                s_tc_holder.append(curr)
+                s_tc, params =self.F2(crash_time, timestamps, prices, True)                
                 
                 # calculate gradient matrix X
                 X_mat = []
@@ -160,51 +164,57 @@ class LPPLS_density():
                     tmp1, tmp2 = sess.run([self.X, self.H], 
                                           feed_dict={self.t: _t,
                                                      self.Pt: _Pt,
-                                                     self.tc: [crash_time]}
+                                                     self.tc: [crash_time],
+                                                     self.params: params}
                                           )
     
                     X_mat.append(tmp1)
                     H_mat += tmp2[0]
                     
                 X_mat = np.squeeze(np.array(X_mat))
-                X_mat_holder.append(X_mat)
-                H_mat_holder.append(H_mat)
-                
-                # find the full MLEs
-#                if curr < SSE_min:
-                if crash_time == N + 50.01:
-                    SSE_min = curr
-                    X_full = X_mat
-                    tc_full = crash_time
-                    D_full = sess.run(self.D)[0]
-                    
-                print("\r{:.0f}%".format(i / len(crash_times) * 100), end="")
-             
-            # *********************************************
-            # * calculate likelihold Lm
-            # ********************************************* 
-            print("\nD:{:.2f}  tc hat:{:.2f}".format(D_full, tc_full-N))
-            log_Lm = []
-            for X_mat, H_mat, s_tc in zip(X_mat_holder, H_mat_holder, s_tc_holder):
                 num = 0.5 * np.linalg.slogdet(np.matmul(X_mat.T, X_mat) - H_mat)[1]
                 den = np.linalg.slogdet(np.matmul(X_full.T, X_mat))[1]
                 log_Lm.append(num - den -.5*(N - 8) * np.log(s_tc))
+                    
+                print("\r{:.0f}%".format(i / len(crash_times) * 100), end="")             
                 
-            log_Lm = np.squeeze(np.array(log_Lm))
-            # normalize the log-likelihood and floor the value to avoid underflow
-            return np.exp(np.maximum(-50, log_Lm - np.max(log_Lm)))
+        print()
+        log_Lm = np.squeeze(np.array(log_Lm))
+        # normalize the log-likelihood and floor the value to avoid underflow
+        return np.exp(np.maximum(-50, log_Lm - np.max(log_Lm)))
 
 
 # use synthetic data with different data lengths
-raw = simulate_LPPLS(50)
-density = LPPLS_density()
-tmp = density.get_MLEs(raw[:, 0], raw[:, 1])
-print(tmp)
-#data = []
-#for i in [100, 200, 250, 300, 400, 500]:
-#    dat = density.get_density(raw[-i:])
-#    data.append( Scatter(y=dat, name=str(i)) )
-#offline.plot(data)
+delta_t = 0   
+n_samples = [75, 100, 150, 200, 300, 400, 500, 600, 700]
 
-#Lm = np.array(Lm).T
-#np.savetxt("output.csv", Lm, delimiter=",")
+raw = simulate_LPPLS(delta_t)
+density = LPPLS_density()
+
+Lm = []
+for i in n_samples:
+    Lm.append( density.get_density(raw[-i:]) )
+Lm = np.array(Lm)
+
+# *********************************************
+# * Plotting
+# *********************************************
+my_color = [
+        [0, "rgb(255, 255, 255)"],
+        [0.4, "rgb(255, 240, 240)"],
+        [0.7, "rgb(255, 179, 179)"],
+        [1, "rgb(255, 102, 102)"]
+        ]
+
+# vertical lines
+layout = Layout(shapes=[
+    {"x0": 50, "y0": n_samples[0], "x1": 50, "y1": n_samples[-1], "line": {"color": "#FF0000"}},
+    {"x0": delta_t+50, "y0": n_samples[0], "x1": delta_t+50, "y1": n_samples[-1]}
+])
+
+offline.plot({
+    "data": [Contour(z=Lm, y=n_samples, colorscale=my_color)],
+    "layout": layout
+})
+
+np.savetxt("output.csv", Lm.T, delimiter=",")
