@@ -9,6 +9,8 @@ Use synthetic data to unit test the code
 
 import tensorflow as tf
 import numpy as np
+import plotly.offline as offline
+from plotly.graph_objs import Data, Contour, Scatter
 
 np.seterr(all="raise")
 
@@ -41,89 +43,133 @@ def compute_hessian(fn, vars):
     mat = tf.stack(mat)
     return mat
 
-# set up variables in tensorflow's graph
-A = tf.Variable(8.0, name="A")
-B = tf.Variable(-0.015, name="B")
-C1 = tf.Variable(0.0010, name="C1")
-C2 = tf.Variable(0.0005, name="C2")
 
-# we will supply tc values later on, hence use placeholder instead of variable
-tc = tf.placeholder(dtype=tf.float32, shape=1, name="tc")
-m = tf.Variable(0.8, name="m")
-w = tf.Variable(9.0, name="w")
-D = m * tf.abs(B) / w / tf.sqrt(tf.pow(C1, 2) + tf.pow(C2, 2))  # damping parameter
-
-# we will suuply data to these two variables, hence use placeholder
-t = tf.placeholder(dtype=tf.float32, shape=None, name="t")
-Pt = tf.placeholder(dtype=tf.float32, shape=None, name="Pt")
-
-# the original LPPLS formula
-LPPLS = A + \
-        B * tf.pow(tf.abs(tc - t), m) + \
-        C1 * tf.pow(tf.abs(tc - t), m) * tf.cos(w * tf.log(tf.abs(tc - t))) + \
-        C2 * tf.pow(tf.abs(tc - t), m) * tf.sin(w * tf.log(tf.abs(tc - t)))
+#def compute_hsesian(fn, params):
     
-X = tf.gradients(LPPLS, [A, B, C1, C2, m, w])  # formula (36)
-H = (tf.log(Pt) - LPPLS) * compute_hessian(LPPLS, [A, B, C1, C2, m, w])  # formula (37)
-SSE = tf.reduce_mean( tf.pow(tf.log(Pt) - LPPLS, 2) )  # formula (9)
 
-# run optimization to get MLEs
-optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
-training_op = optimizer.minimize(SSE)
 
-# initialize all variables defined above
-init_op = tf.global_variables_initializer()
-
-with tf.Session() as sess:
-    sess.run(init_op)  # run initialization step
-
-    # use synthetic data with different data lengths
-    raw = simulate_LPPLS(50)
+def get_LPPLS_density(prices):
+    """
+    Args:
+        prices (array of double): price series to be exmained. Should at least
+                                    contains 75 data points
+        
+    Returns:
+        Density of each time point from -50 of last point to +100 of last point
+    """
     
-    Lm = []
-    for delta_t in [300, 500, 700]:  #range(75, 701, 50):
-        print("running", delta_t)
+    # clean up default graph
+    tf.reset_default_graph()
+    N = len(prices)
+    
+    # *********************************************
+    # * set up tensorflow computation graph
+    # *********************************************
+    
+    # set up variables in tensorflow's graph
+    # represent A, B, C1, C2, m, w respectively
+    params = tf.Variable([8.0, -.015, .001, .0005, .8, 9.0])
+    A, B, C1, C2, m, w = tf.split(params, 6)
+    D = m * tf.abs(B) / w / tf.sqrt(tf.pow(C1, 2) + tf.pow(C2, 2))  # damping parameter
+
+    # we will suuply data to these two variables, hence use placeholder
+    tc = tf.placeholder(dtype=tf.float32, shape=1, name="tc")
+    t = tf.placeholder(dtype=tf.float32, shape=None, name="t")
+    Pt = tf.placeholder(dtype=tf.float32, shape=None, name="Pt")
+
+    # the LPPLS formula
+    def get_LPPLS(a, b, c1, c2, _m, _w, _tc, _t):
+        p1 = b * tf.pow(tf.abs(_tc - _t), _m)
+        p2 = c1 * tf.pow(tf.abs(_tc - _t), _m) * tf.cos(_w * tf.log(tf.abs(_tc - _t)))
+        p3 = c2 * tf.pow(tf.abs(_tc - _t), _m) * tf.sin(_w * tf.log(tf.abs(_tc - _t)))
+        return a + p1 + p2 + p3
+    
+    LPPLS = get_LPPLS(A, B, C1, C2, m, w, tc, t)
+            
+    X = tf.gradients(LPPLS, params)  # formula (36) 
+    H = (tf.log(Pt) - LPPLS) * tf.hessians(LPPLS, params)  # formula (37)
+
+    SSE = tf.reduce_mean( tf.pow(tf.log(Pt) - LPPLS, 2) )  # formula (9)
+
+
+    # *********************************************
+    # * use optimization to get MLEs
+    # *********************************************
+    optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
+    training_op = optimizer.minimize(SSE)
+
+    # initialize all variables defined above
+    init_op = tf.global_variables_initializer()
+
+
+    # *********************************************
+    # * Start computing the density
+    # *********************************************
+    with tf.Session() as sess:
+        sess.run(init_op)  # run initialization step
+        print("start")
+        print("Length of price series: ", N)
+
+        timestamps = np.arange(N) + 1
+        crash_times = np.arange(N-50, N+150) + 0.01  # plus 0.01 to avoid singularity when tc = t
         
-        Pt0 = raw[-delta_t: ]
-        N = len(Pt0)
-        t0 = np.arange(N) 
-        tc0 = np.arange(N-50, N+150) + 0.1  # plus 0.01 to avoid singularity when tc = t
         
-        log_Lm = []  # to hold log-likelihood
-        for tmp_tc in tc0:
+        # *********************************************
+        # * evaluate conditional MLEs on specific tc value
+        # *********************************************
+        SSE_min = np.inf
+        X_mat_holder, H_mat_holder, s_tc_holder = [], [], []
+        for i, crash_time in enumerate(crash_times):
             # get MLEs
             curr, prev = -1, 0
             while abs(curr - prev) > 1E-6:
                 prev = curr
                 _, curr = sess.run([training_op, SSE], 
-                                   feed_dict={t: t0, Pt: Pt0, tc: [tmp_tc]})
-                
-            Ah, Bh, C1h, C2h, Dh, mh, wh = sess.run([A, B, C1, C2, D, m, w])
-            s_tc = curr
+                                   feed_dict={t: timestamps, 
+                                              Pt: prices, 
+                                              tc: [crash_time]})                
+            s_tc_holder.append(curr)
             
             # calculate gradient matrix X
             X_mat = []
-            for tmp_t in t0:
-                row = sess.run( X, feed_dict={t: [tmp_t], tc: [tmp_tc]} )
-                row = np.hstack( row )
-                X_mat.append( row )
-            X_mat = np.vstack( X_mat )
-            
-            # calculate Hessian matrix H
             H_mat = np.zeros([6, 6])
-            for tmp_t, tmp_p in zip( t0, Pt0 ):
-                row = sess.run( H, feed_dict={t: [tmp_t], Pt: [tmp_p], tc: [tmp_tc]} )
-                H_mat += np.squeeze( row )  # squeeze to remove redundant dimensions
+            for _t, _Pt in zip(timestamps, prices):
+                X_mat.append(sess.run( X, feed_dict={t: _t, tc: [crash_time]}))
+                H_mat += sess.run( H, feed_dict={t: _t, Pt: _Pt, tc: [crash_time]})[0]
+                
+            X_mat = np.squeeze(np.array(X_mat))
+            X_mat_holder.append(X_mat)
+            H_mat_holder.append(H_mat)
             
-            # calculate likelihold Lm            
-            XTX = np.matmul(X_mat.T, X_mat)
-            num = 0.5 * np.linalg.slogdet(XTX - H_mat)[1]
-            den = np.linalg.slogdet(XTX)[1]
+            # find the full MLEs
+            if curr < SSE_min:
+                SSE_min = curr
+                X_full = X_mat
+                tc_full = crash_time
+                D_full = sess.run(D)[0]
+                
+            print("\r{:.0f}%".format(i / len(crash_times) * 100), end="")
+         
+        # *********************************************
+        # * calculate likelihold Lm
+        # ********************************************* 
+        print("\nD:{:.2f}  tc hat:{:.2f}".format(D_full, tc_full-N))
+        log_Lm = []
+        for X_mat, H_mat, s_tc in zip(X_mat_holder, H_mat_holder, s_tc_holder):
+            num = 0.5 * np.linalg.slogdet(np.matmul(X_mat.T, X_mat) - H_mat)[1]
+            den = np.linalg.slogdet(np.matmul(X_full.T, X_mat))[1]
             log_Lm.append(num - den -.5*(N - 8) * np.log(s_tc))
             
-        log_Lm = np.array(log_Lm)
+        log_Lm = np.squeeze(np.array(log_Lm))
         # normalize the log-likelihood and floor the value to avoid underflow
-        Lm.append(np.exp(np.maximum(-50, log_Lm - np.max(log_Lm))))  
-        
-    Lm = np.array(Lm).T
-    np.savetxt("output.csv", Lm, delimiter=",")
+        return np.exp(np.maximum(-50, log_Lm - np.max(log_Lm)))
+
+
+# use synthetic data with different data lengths
+raw = simulate_LPPLS(50)[-400:]
+dat = get_LPPLS_density(raw)
+data = [Scatter(y=dat)]
+offline.plot(data)
+
+#Lm = np.array(Lm).T
+#np.savetxt("output.csv", Lm, delimiter=",")
