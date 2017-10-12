@@ -9,11 +9,17 @@ Use synthetic data to unit test the code
 
 import tensorflow as tf
 import numpy as np
+import pandas as pd
 import scipy as sp
 import plotly.offline as offline
 from plotly.graph_objs import Layout, Contour
 
 np.seterr(all="raise")
+
+
+def get_history(date="2017-06-11", delta_t=50):
+    data = pd.read_csv("../data/" + date + ".csv", delimiter="\t")
+    return np.array(data[-delta_t - 701:-(delta_t + 1)])
 
 
 def simulate_LPPLS(delta_t):
@@ -188,7 +194,8 @@ class LPPLS_density():
 delta_t = 0   
 n_samples = [75, 100, 150, 200, 300, 400, 500, 600, 700]
 
-raw = simulate_LPPLS(delta_t)
+#raw = simulate_LPPLS(delta_t)
+raw = get_history("2017-06-11", delta_t)
 density = LPPLS_density()
 
 Lm = []
