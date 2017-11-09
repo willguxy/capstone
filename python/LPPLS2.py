@@ -12,13 +12,13 @@ import numpy as np
 import pandas as pd
 import scipy as sp
 import plotly.offline as offline
-from plotly.graph_objs import Layout, Contour
+from plotly.graph_objs import Layout, Contour, Scatter
 
 np.seterr(all="raise")
 
 
 def get_history(date="2017-06-11", delta_t=50):
-    data = pd.read_csv("../data/" + date + ".csv", delimiter="\t")
+    data = pd.read_csv("../data/" + date + ".csv", delimiter=",")
     return np.array(data[-delta_t - 701:-(delta_t + 1)])
 
 
@@ -64,6 +64,12 @@ class LPPLS_density():
         self.init_op = tf.global_variables_initializer()
         print("Finish initializing ...")
         
+    def get_LPPLS(self, a, b, c1, c2, _m, _w, _tc, _t):
+            p1 = b * np.power(np.abs(_tc - _t), _m)
+            p2 = c1 * np.power(np.abs(_tc - _t), _m) * np.cos(_w * np.log(np.abs(_tc - _t)))
+            p3 = c2 * np.power(np.abs(_tc - _t), _m) * np.sin(_w * np.log(np.abs(_tc - _t)))
+            return a + p1 + p2 + p3
+        
         
     # *********************************************
     # * SSE function subordinating m, w to tc / Formula (15)
@@ -100,7 +106,7 @@ class LPPLS_density():
         for m in ms:
             for w in ws:
                 res = sp.optimize.minimize(F1, x0=[m, w], 
-                                           bounds=((0.05, 0.95), (5.5, 13.5)),
+                                           bounds=((0.1, 0.9), (6, 13)),
                                            method="L-BFGS-B", 
                                            tol=1E-6)
                 if res.fun < best_SSE:
@@ -118,9 +124,9 @@ class LPPLS_density():
     # *********************************************
     def get_MLEs(self, t, Pt):       
         res = sp.optimize.minimize_scalar(self.F2, 
-                                          [t[-1] - 50.01, t[-1]+200.01], 
+                                          bracket = (t[-1] - 50.01, t[-1]+200.01), 
                                           args=(t, Pt),
-                                          method="Golden", 
+                                          method="golden", 
                                           tol=1E-6)           
         _, ABCCmw = self.F2(res.x, t, Pt, True)
         return res.fun, np.hstack([ABCCmw, res.x])
@@ -142,8 +148,14 @@ class LPPLS_density():
             # * evaluate full MLEs
             # *********************************************
             s_tc_full, params = self.get_MLEs(timestamps, prices)
-            _, B, C1, C2, m, w, tc_full = params
+            A, B, C1, C2, m, w, tc_full = params
             D_full = m * np.abs(B) / w / np.sqrt(C1**2 + C2**2)
+            
+            # plot fitted formula
+            sim = np.exp( self.get_LPPLS(*params, timestamps) )
+            plot1 = Scatter(x=timestamps, y=prices)
+            plot2 = Scatter(x=timestamps, y=sim)
+            offline.plot([plot1, plot2])
             
             # calculate full MLE gradients
             X_full = []
@@ -195,7 +207,7 @@ delta_t = 0
 n_samples = [75, 100, 150, 200, 300, 400, 500, 600, 700]
 
 #raw = simulate_LPPLS(delta_t)
-raw = get_history("2017-06-11", delta_t)
+raw = get_history("2017-09-01", delta_t)
 density = LPPLS_density()
 
 Lm = []
