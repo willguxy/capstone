@@ -102,9 +102,8 @@ class LPPLS_density():
             return SSE
     
         # multiple starting points to mitigate local extrema
-        retrys = 10
+        retrys = 15
         counter = 0
-        errs = 0
         best_SSE = np.inf
 
         while 1:
@@ -115,13 +114,10 @@ class LPPLS_density():
                 if res.fun < best_SSE:
                     best_SSE = res.fun
                     params = res.x                    
-                counter += 1                
+                counter += 1   
             except:
-                errs += 1
-        
-            if errs > np.floor(retrys / 2):
-                return False, None, None
-            
+                pass                     
+
             if counter > retrys:
                 break
 
@@ -212,7 +208,7 @@ class LPPLS_density():
         log_Lm = np.array( log_Lm )
         Lm = np.exp( log_Lm - np.max( log_Lm ) )
         Lmp = np.power( F2s, -N/2 )
-        return [ F2s, Lm, Lmp/np.max( Lmp ), ms, ws, Ds, tcs ]
+        return [ F2s, Lm, Lmp/np.max( Lmp ), np.abs( ms ), np.abs( ws ), Ds, tcs ]
 
 
 data = pd.read_csv("../data/000001.SS.csv")
@@ -228,11 +224,11 @@ print(Lm)
 # * Plotting
 # *********************************************
 
-fig = tools.make_subplots( rows=5, cols=1 )
+fig = tools.make_subplots( rows=4, cols=1 )
 fig.append_trace( Scatter(x=tcs, y=F2s), 1, 1 )
-fig.append_trace( Scatter(x=tcs, y=Lm), 2, 1 )
-fig.append_trace( Scatter(x=tcs, y=Lmp), 3, 1)
-fig.append_trace( Scatter(x=tcs, y=ws), 4, 1)
-fig.append_trace( Scatter(x=tcs, y=Ds), 5, 1)
+fig.append_trace( Scatter(x=tcs, y=Lm, name="Modified LP"), 2, 1 )
+fig.append_trace( Scatter(x=tcs, y=Lmp, name="LP" ), 2, 1)
+fig.append_trace( Scatter(x=tcs, y=ws), 3, 1)
+fig.append_trace( Scatter(x=tcs, y=Ds), 4, 1)
 
 offline.plot( fig )
