@@ -84,7 +84,7 @@ class LPPLS_density():
     # *********************************************
     # * Jacobian and Hessian for tc, m
     # *********************************************
-    def get_X_m(self, t, tc, A, B, C1, C2, w, m):
+    def get_X_m(self, t, tc, A, B, C1, C2, m, w):
         X1 = np.power(np.abs(tc - t), m)
         X2 = np.log(np.abs(tc - t))
         X3 = np.cos(w * X2)
@@ -93,7 +93,7 @@ class LPPLS_density():
 
         return X.T
 
-    def get_H_m(self, t, tc, A, B, C1, C2, w, m):
+    def get_H_m(self, t, tc, A, B, C1, C2, m, w):
         X1 = np.power(np.abs(tc - t), m)
         X2 = np.log(np.abs(tc - t))
         X3 = np.cos(w * X2)
@@ -130,28 +130,26 @@ class LPPLS_density():
 
         return H
 
-    def get_log_lm_m(self, t, tc, Pt, mle_params, _m):
-        SSE, params = self.F2(tc, _m, None, t, Pt, True)
-        jacob = self.get_X_m(t, tc, *params, _m)
-        jacob_mle = self.get_X_m(t, tc, *mle_params[:4], mle_params[5], _m)
-        hess = self.get_H_m(t, tc, *params, _m)
-        err = (np.log(Pt) - self.get_LPPLS(t, tc, *params[:4], _m, params[4]))[:, None, None]
+    def get_log_lm_m(self, t, tc, Pt, mle_params, m_params, m_sse):
+        jacob = self.get_X_m(t, tc, *m_params)
+        jacob_mle = self.get_X_m(t, tc, *mle_params)
+        hess = self.get_H_m(t, tc, *m_params)
+        err = (np.log(Pt) - self.get_LPPLS(t, tc, *m_params))[:, None, None]
         hess = np.sum(err * hess, 0)
         log_Lm = 0.5 * np.linalg.slogdet(np.matmul(jacob.T, jacob) - hess)[1]
         log_Lm -= np.linalg.slogdet(np.matmul(jacob_mle.T, jacob))[1]
-        log_Lm -= (len(Pt) - 7) / 2 * np.log(SSE)
+        log_Lm -= (len(Pt) - 7) / 2 * np.log(m_sse)
         return log_Lm
 
-    def get_log_lm_w(self, t, tc, Pt, mle_params, _w):
-        SSE, params = self.F2(tc, None, _w, t, Pt, True)
-        jacob = self.get_X_w(t, tc, *params, _w)
-        jacob_mle = self.get_X_w(t, tc, *mle_params[:5], _w)
-        hess = self.get_H_w(t, tc, *params, _w)
-        err = (np.log(Pt) - self.get_LPPLS(t, tc, *params, _w))[:, None, None]
+    def get_log_lm_w(self, t, tc, Pt, mle_params, w_params, w_sse):
+        jacob = self.get_X_w(t, tc, *w_params)
+        jacob_mle = self.get_X_w(t, tc, *mle_params)
+        hess = self.get_H_w(t, tc, *w_params)
+        err = (np.log(Pt) - self.get_LPPLS(t, tc, *w_params))[:, None, None]
         hess = np.sum(err * hess, 0)
         log_Lm = 0.5 * np.linalg.slogdet(np.matmul(jacob.T, jacob) - hess)[1]
         log_Lm -= np.linalg.slogdet(np.matmul(jacob_mle.T, jacob))[1]
-        log_Lm -= (len(Pt) - 7) / 2 * np.log(SSE)
+        log_Lm -= (len(Pt) - 7) / 2 * np.log(w_sse)
         return log_Lm
 
     # *********************************************
@@ -251,7 +249,7 @@ class LPPLS_density():
         N = len(prices)
         # plus 0.01 to avoid singularity when tc = t
         cob_date = timestamps[-1]
-        crash_times = np.arange(cob_date-10, cob_date+40) + 0.01
+        crash_times = np.arange(cob_date-10, cob_date+50) + 0.01
 
         print("------------------- ")
         print("Length:", N, flush=True)
@@ -306,14 +304,15 @@ class LPPLS_density():
                 w_test = None
 
             if valid and m_test:
-                # print("check:", res.crash, res.params)
-                lm_m = np.exp(self.get_log_lm_m(timestamps, res.crash, prices, res.params, m_test)
-                              - self.get_log_lm_m(timestamps, res.crash, prices, res.params, res.params[4]))
+                m_sse, m_params = self.F2(res.crash, m_test, None, timestamps, prices, True)
+                lm_m = np.exp(self.get_log_lm_m(timestamps, res.crash, prices, res.params, m_params, m_sse)
+                              - self.get_log_lm_m(timestamps, res.crash, prices, res.params, res.params, res.SSE))
                 valid &= lm_m > 0.05
 
             if valid and w_test:
-                lm_w = np.exp(self.get_log_lm_w(timestamps, res.crash, prices, res.params, w_test)
-                              - self.get_log_lm_w(timestamps, res.crash, prices, res.params, res.params[5]))
+                w_sse, w_params = self.F2(res.crash, None, w_test, timestamps, prices, True)
+                lm_w = np.exp(self.get_log_lm_w(timestamps, res.crash, prices, res.params, w_params, w_sse)
+                              - self.get_log_lm_w(timestamps, res.crash, prices, res.params, res.params, res.SSE))
                 valid &= lm_w > 0.05
 
             filter.append(valid)
@@ -322,18 +321,17 @@ class LPPLS_density():
 
         log_Lm = np.array(log_Lm)
         Lm = np.exp(log_Lm - np.max(log_Lm))
-        Lmp = np.power(F2s, -N/2)
-        return [F2s, Lm, Lmp/np.max(Lmp), np.abs(ms), np.abs(ws), Ds, tcs, filter]
+        return [F2s, Lm, np.abs(ms), np.abs(ws), Ds, tcs, filter]
 
 
 # data = pd.read_csv("../data/000001.SS.csv")
-sample_sizes = np.arange(100, 750, 10)
+sample_sizes = np.arange(100, 750, 50)
 lm_all = []
 keep_all = []
 density = LPPLS_density()
 for length in sample_sizes:
     data = get_history("000001.SS.csv", delta_t=0, length=length, col="Adj Close")
-    F2s, Lm, Lmp, ms, ws, Ds, tcs, keep = density.get_density(data.time.as_matrix(), data.price.as_matrix())
+    F2s, Lm, ms, ws, Ds, tcs, keep = density.get_density(data.time.as_matrix(), data.price.as_matrix())
     lm_all.append(Lm)
     keep_all.append(keep)
 
