@@ -157,7 +157,7 @@ class LPPLS_density():
     # *********************************************
     # * SSE function subordinating m, w to tc / Formula (15)
     # *********************************************
-    def F2(self, tc, m0, w0, t ,Pt, flag=False):
+    def F2(self, tc, m0, w0, t, Pt, flag=False):
         N = len(Pt)
         y = np.log(Pt)
 
@@ -206,6 +206,8 @@ class LPPLS_density():
                     res = optimize.minimize(F1, x0=[m, w], method="Nelder-Mead", tol=1E-6)
                 if res.fun < best_SSE:
                     best_SSE = res.fun
+                    if m0 or w0:
+                        res.x = np.hstack([m0, res.x]) if m0 else np.hstack([res.x, w0])
                     params = res.x
                 counter += 1
             except ValueError:
@@ -249,7 +251,7 @@ class LPPLS_density():
         N = len(prices)
         # plus 0.01 to avoid singularity when tc = t
         cob_date = timestamps[-1]
-        crash_times = np.arange(cob_date-10, cob_date+150) + 0.01
+        crash_times = np.arange(cob_date-10, cob_date+40) + 0.01
 
         print("------------------- ")
         print("Length:", N, flush=True)
