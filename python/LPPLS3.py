@@ -317,7 +317,8 @@ class LPPLS_density():
                 valid &= lm_w > 0.05
 
             filter.append(valid)
-            print("\rCalculating filter: {:.0f}%".format(counter / len(results) * 100), end="")
+            print("\rCalculating filter: {:.0f}%".format((counter + 1)/ len(results) * 100), end="")
+        print()
 
         log_Lm = np.array(log_Lm)
         Lm = np.exp(log_Lm - np.max(log_Lm))
