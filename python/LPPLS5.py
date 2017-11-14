@@ -4,7 +4,7 @@ Created on Sat Sep 30 23:05:34 2017
 
 @author: albert
 
-Use synthetic data to unit test the code
+use naive optimization procedure
 """
 
 import numpy as np
@@ -155,69 +155,44 @@ class LPPLS_density():
     # *********************************************
     # * SSE function subordinating m, w to tc / Formula (15)
     # *********************************************
-    def F2(self, tc, m0, w0, t, Pt, flag=False):
-        N = len(Pt)
-        y = np.log(Pt)
+    def lppls_cost(self, params, tc, t, pt):
+        a, b, c1, c2, m, w = params
+        n = len(pt)
+        y = np.log(pt)
 
-        # subordinating A, B, C1, C2 to m, w
-        def F1(params, flag=False):
-            if m0:
-                _m, _w = m0, params[0]
-            elif w0:
-                _m, _w = params[0], w0
-            else:
-                _m, _w = params
+        x1 = np.power(np.abs(tc - t), m)
+        x2 = w*np.log(np.abs(tc - t))
+        lppls = a + b*x1 + c1*x1*np.cos(x2) + c2*x1*np.sin(x2)
+        sse = np.sum(np.power(y - lppls, 2))
 
-            tmp = np.power(np.abs(tc - t), _m)
+        return sse
 
-            X = [np.ones(N),
-                 tmp,
-                 tmp * np.cos(_w * np.log(np.abs(tc - t))),
-                 tmp * np.sin(_w * np.log(np.abs(tc - t)))]
-
-            X = np.vstack(X).T
-            try:
-                beta = sp.matmul(sp.linalg.inv(sp.matmul(X.T, X)), sp.matmul(X.T, y))
-            except:
-                # print(_m, _w)
-                raise ValueError("X is singular")
-
-            SSE = np.sum(np.power(y - np.matmul(beta, X.T), 2))
-            if flag:
-                return SSE, beta
-            return SSE
-
-        # multiple starting points to mitigate local extrema
-        retrys = 15
-        counter = 0
-        best_SSE = np.inf
-
+    def optimize_mutli(self, tc, t, pt, retry=20):
         from scipy import optimize
-
-        while 1:
-            m = m0 if m0 else np.random.uniform(0.1, 0.9)
-            w = w0 if w0 else np.random.uniform(6, 13)
+        counter = 0
+        best_sse = np.inf
+        best_params = [None] * 6
+        while True:
+            b0 = -np.random.standard_exponential(1)[0]
+            m0 = np.random.uniform(0.1, 0.9)
+            w0 = np.random.uniform(6, 13)
             try:
-                if m0 or w0:
-                    res = optimize.minimize(F1, x0=[w if m0 else m], method="Nelder-Mead", tol=1E-6)
-                else:
-                    res = optimize.minimize(F1, x0=[m, w], method="Nelder-Mead", tol=1E-6)
-                if res.fun < best_SSE:
-                    best_SSE = res.fun
-                    if m0 or w0:
-                        res.x = np.hstack([m0, res.x]) if m0 else np.hstack([res.x, w0])
-                    params = res.x
+                res = optimize.minimize(self.lppls_cost,
+                                        x0=np.array([None, b0, None, None, m0, w0]),
+                                        args=(tc, t, pt),
+                                        method="Nelder-Mead",
+                                        tol=1E-6)
+                if res.fun < best_sse:
+                    best_sse = res.fun
+                    best_params = res.x
                 counter += 1
             except ValueError:
                 pass
 
-            if counter > retrys:
+            if counter > retry:
                 break
 
-        if flag:
-            _, ABCC = F1(params, True)
-            return best_SSE, np.hstack([ABCC, params])
-        return best_SSE
+        return best_sse, best_params
 
     # *********************************************
     # * full MLEs / Formula (14)
@@ -228,13 +203,13 @@ class LPPLS_density():
             self.SSE = SSE
             self.params = params
 
-    def get_MLEs_linear(self, crash_times, t, Pt):
+    def get_mle_linear(self, crash_times, t, pt):
         results = []
         best_result = self.Result()
         counter = 0
         for crash in crash_times:
-            SSE, params = self.F2(crash, None, None, t, Pt, True)
-            results.append(self.Result(crash,SSE,params))
+            sse, params = self.optimize_mutli(crash, t, pt)
+            results.append(self.Result(crash, sse, params))
 
             if results[-1].SSE < best_result.SSE:
                 best_result = results[-1]
@@ -257,7 +232,7 @@ class LPPLS_density():
         # *********************************************
         # * evaluate density value at each crash time point
         # *********************************************    
-        mle, results = self.get_MLEs_linear(crash_times, timestamps, prices)
+        mle, results = self.get_mle_linear(crash_times, timestamps, prices)
         print("tc:", mle.crash, " | SSE:", mle.SSE/N)
 
         log_Lm = []
@@ -284,39 +259,11 @@ class LPPLS_density():
             Ds.append( m*abs(B) / w / np.sqrt(C1**2 + C2**2))
             tcs.append(ref_date + datetime.timedelta(days=np.floor(res.crash)-cob_date))
 
-            # calculate likelihood for m, w
-            valid = True
-            if res.params[5] < 3:
-                valid = False
-
-            if res.params[4] > 0.9:
-                m_test = 0.9
-            elif res.params[4] < 0.1:
-                m_test = 0.1
-            else:
-                m_test = None
-
-            if res.params[5] > 13:
-                w_test = 13
-            elif res.params[5] < 6:
-                w_test = 6
-            else:
-                w_test = None
-
-            if valid and m_test:
-                m_sse, m_params = self.F2(res.crash, m_test, None, timestamps, prices, True)
-                lm_m = np.exp(self.get_log_lm_m(timestamps, res.crash, prices, res.params, m_params, m_sse)
-                              - self.get_log_lm_m(timestamps, res.crash, prices, res.params, res.params, res.SSE))
-                valid &= lm_m > 0.05
-
-            if valid and w_test:
-                w_sse, w_params = self.F2(res.crash, None, w_test, timestamps, prices, True)
-                lm_w = np.exp(self.get_log_lm_w(timestamps, res.crash, prices, res.params, w_params, w_sse)
-                              - self.get_log_lm_w(timestamps, res.crash, prices, res.params, res.params, res.SSE))
-                valid &= lm_w > 0.05
+            # filtering using m and w
+            valid = 0.1 < res.params[4] < 0.9 and 6 < res.params[5] < 13
 
             filter.append(valid)
-            print("\rCalculating filter: {:.0f}%".format((counter + 1)/ len(results) * 100), end="")
+            print("\rCalculating filter: {:.0f}%".format((counter + 1) / len(results) * 100), end="")
         print()
 
         log_Lm = np.array(log_Lm)
@@ -325,7 +272,7 @@ class LPPLS_density():
 
 
 # data = pd.read_csv("../data/000001.SS.csv")
-sample_sizes = np.arange(100, 500, 25)
+sample_sizes = np.arange(150, 500, 50)
 lm_all = []
 keep_all = []
 density = LPPLS_density()
