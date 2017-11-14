@@ -4,7 +4,7 @@ Created on Sat Sep 30 23:05:34 2017
 
 @author: albert
 
-Use synthetic data to unit test the code
+use strict filtering for testing
 """
 
 import numpy as np
@@ -284,36 +284,8 @@ class LPPLS_density():
             Ds.append( m*abs(B) / w / np.sqrt(C1**2 + C2**2))
             tcs.append(ref_date + datetime.timedelta(days=np.floor(res.crash)-cob_date))
 
-            # calculate likelihood for m, w
-            valid = True
-            if res.params[5] < 3:
-                valid = False
-
-            if res.params[4] > 0.9:
-                m_test = 0.9
-            elif res.params[4] < 0.1:
-                m_test = 0.1
-            else:
-                m_test = None
-
-            if res.params[5] > 13:
-                w_test = 13
-            elif res.params[5] < 6:
-                w_test = 6
-            else:
-                w_test = None
-
-            if valid and m_test:
-                m_sse, m_params = self.F2(res.crash, m_test, None, timestamps, prices, True)
-                lm_m = np.exp(self.get_log_lm_m(timestamps, res.crash, prices, res.params, m_params, m_sse)
-                              - self.get_log_lm_m(timestamps, res.crash, prices, res.params, res.params, res.SSE))
-                valid &= lm_m > 0.05
-
-            if valid and w_test:
-                w_sse, w_params = self.F2(res.crash, None, w_test, timestamps, prices, True)
-                lm_w = np.exp(self.get_log_lm_w(timestamps, res.crash, prices, res.params, w_params, w_sse)
-                              - self.get_log_lm_w(timestamps, res.crash, prices, res.params, res.params, res.SSE))
-                valid &= lm_w > 0.05
+            # filtering using m and w
+            valid = 0.1 < res.params[4] < 0.9 and 6 < res.params[5] < 13
 
             filter.append(valid)
             print("\rCalculating filter: {:.0f}%".format((counter + 1)/ len(results) * 100), end="")
@@ -325,7 +297,7 @@ class LPPLS_density():
 
 
 # data = pd.read_csv("../data/000001.SS.csv")
-sample_sizes = np.arange(520, 530, 100)
+sample_sizes = np.arange(100, 500, 25)
 lm_all = []
 keep_all = []
 density = LPPLS_density()
