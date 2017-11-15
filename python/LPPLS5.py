@@ -19,10 +19,11 @@ from plotly.graph_objs import Layout, Contour, Scatter, Heatmap
 np.seterr(all="raise")
 
 
-def get_history(filename="2017-06-11", delta_t=50, length=150, col="price"):
-    data = pd.read_csv("../data/" + filename)
+def get_history(filename="2017-06-11", end_date="", delta_t=50, length=150, col="price"):
+    data = pd.read_csv("../data/" + filename, parse_dates=["Time"])
     data["price"] = data[col]
     data["time"] = np.arange(data.shape[0])
+    data = data[data.Time <= end_date]
     if delta_t == 0:
         return data[-length:][["time", "price"]]
     return data[-delta_t-length: -delta_t][["time", "price"]]
@@ -226,7 +227,7 @@ class LPPLS_density():
 
         return best_result, results
 
-    def get_density(self, timestamps, prices):
+    def get_density(self, timestamps, prices, ref_date):
         N = len(prices)
         # plus 0.01 to avoid singularity when tc = t
         cob_date = timestamps[-1]
@@ -243,7 +244,7 @@ class LPPLS_density():
 
         log_Lm = []
         F2s = [ res.SSE for res in results ]
-        ref_date = datetime.date(2015, 6, 12)
+        # ref_date = datetime.date(2015, 6, 12)
         ms = [ res.params[4] for res in results ]
         ws = [ res.params[5] for res in results ]
         Ds = []
@@ -283,8 +284,10 @@ lm_all = []
 keep_all = []
 density = LPPLS_density()
 for length in sample_sizes:
-    data = get_history("000001.SS.csv", delta_t=0, length=length, col="Adj Close")
-    F2s, Lm, ms, ws, Ds, tcs, keep = density.get_density(data.time.as_matrix(), data.price.as_matrix())
+    data = get_history("bitcoinity_data.csv", "2017-05-25", delta_t=0, length=length, col="itbit")
+    F2s, Lm, ms, ws, Ds, tcs, keep = density.get_density(data.time.as_matrix(),
+                                                         data.price.as_matrix(),
+                                                         datetime.date(2017, 5, 25))
     lm_all.append(Lm)
     keep_all.append(keep)
 
