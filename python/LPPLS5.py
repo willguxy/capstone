@@ -167,7 +167,7 @@ class LPPLS_density():
 
         return sse
 
-    def optimize_mutli(self, tc, t, pt, retry=20):
+    def optimize_mutli(self, tc, t, pt, retry=30):
         from scipy import optimize
         counter = 0
         best_sse = np.inf
@@ -178,9 +178,15 @@ class LPPLS_density():
             w0 = np.random.uniform(6, 13)
             try:
                 res = optimize.minimize(self.lppls_cost,
-                                        x0=np.array([None, b0, None, None, m0, w0]),
+                                        x0=np.array([0, b0, 1, 1, m0, w0]),
+                                        bounds=[[-np.inf, np.inf],
+                                                [-np.inf, np.inf],
+                                                [-np.inf, np.inf],
+                                                [-np.inf, np.inf],
+                                                [-1, 2],
+                                                [1, 20]],
                                         args=(tc, t, pt),
-                                        method="Nelder-Mead",
+                                        method="L-BFGS-B",
                                         tol=1E-6)
                 if res.fun < best_sse:
                     best_sse = res.fun
@@ -224,7 +230,7 @@ class LPPLS_density():
         N = len(prices)
         # plus 0.01 to avoid singularity when tc = t
         cob_date = timestamps[-1]
-        crash_times = np.arange(cob_date-10, cob_date+150) + 0.01
+        crash_times = np.arange(cob_date-10, cob_date+50) + 0.01
 
         print("------------------- ")
         print("Length:", N, flush=True)
