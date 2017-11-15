@@ -7,8 +7,9 @@ Created on Sat Sep 30 23:05:34 2017
 Use synthetic data to unit test the code
 """
 
+from utils import get_history
+
 import numpy as np
-import pandas as pd
 import scipy as sp
 
 import datetime
@@ -19,24 +20,6 @@ from plotly.graph_objs import Layout, Contour, Scatter, Heatmap
 np.seterr(all="raise")
 
 
-def get_history(filename="2017-06-11", end_date="", delta_t=50, length=150, col="price"):
-    data = pd.read_csv("../data/" + filename, parse_dates=["Time"])
-    data["price"] = data[col]
-    data["time"] = np.arange(data.shape[0])
-    data = data[data.Time <= end_date]
-    if delta_t == 0:
-        return data[-length:][["time", "price"]]
-    return data[-delta_t-length: -delta_t][["time", "price"]]
-
-
-def simulate_LPPLS(delta_t):
-    A, B, C, tc, m, w, phi, sig = 8, -.015, .0015, 1080.01, .8, 9, 0.0, .03    
-    t = np.arange(int(tc) - delta_t - 800, int(tc) - delta_t)
-    LPPLS = A + \
-        B * np.power(np.abs(tc - t), m) + \
-        C * np.power(np.abs(tc - t), m) * np.cos(w * np.log(np.abs(tc - t)) + phi)
-    
-    return np.vstack([t, np.exp(LPPLS + np.random.normal(0, sig, len(t)))]).T 
 
 
 class LPPLS_density():
@@ -189,8 +172,9 @@ class LPPLS_density():
             return SSE
 
         # multiple starting points to mitigate local extrema
-        retrys = 15
+        retries = 15
         counter = 0
+        succeeds = 0
         best_SSE = np.inf
 
         from scipy import optimize
@@ -208,17 +192,24 @@ class LPPLS_density():
                     if m0 or w0:
                         res.x = np.hstack([m0, res.x]) if m0 else np.hstack([res.x, w0])
                     params = res.x
-                counter += 1
+                succeeds += 1
+                counter = 0
             except ValueError:
                 pass
 
-            if counter > retrys:
+            counter += 1
+            if counter > retries:
+                if flag:
+                    return False, None, None
+                return False, None
+
+            if succeeds > retries:
                 break
 
         if flag:
             _, ABCC = F1(params, True)
-            return best_SSE, np.hstack([ABCC, params])
-        return best_SSE
+            return True, best_SSE, np.hstack([ABCC, params])
+        return True, best_SSE
 
     # *********************************************
     # * full MLEs / Formula (14)
@@ -234,7 +225,7 @@ class LPPLS_density():
         best_result = self.Result()
         counter = 0
         for crash in crash_times:
-            SSE, params = self.F2(crash, None, None, t, Pt, True)
+            succeed, SSE, params = self.F2(crash, None, None, t, Pt, True)
             results.append(self.Result(crash,SSE,params))
 
             if results[-1].SSE < best_result.SSE:
@@ -287,8 +278,6 @@ class LPPLS_density():
 
             # calculate likelihood for m, w
             valid = True
-            if res.params[5] < 3:
-                valid = False
 
             if res.params[4] > 0.9:
                 m_test = 0.9
@@ -305,16 +294,22 @@ class LPPLS_density():
                 w_test = None
 
             if valid and m_test:
-                m_sse, m_params = self.F2(res.crash, m_test, None, timestamps, prices, True)
-                lm_m = np.exp(self.get_log_lm_m(timestamps, res.crash, prices, res.params, m_params, m_sse)
-                              - self.get_log_lm_m(timestamps, res.crash, prices, res.params, res.params, res.SSE))
-                valid &= lm_m > 0.05
+                succeed, m_sse, m_params = self.F2(res.crash, m_test, None, timestamps, prices, True)
+                if succeed:
+                    lm_m = np.exp(self.get_log_lm_m(timestamps, res.crash, prices, res.params, m_params, m_sse)
+                                  - self.get_log_lm_m(timestamps, res.crash, prices, res.params, res.params, res.SSE))
+                    valid &= lm_m > 0.05
+                else:
+                    valid = False
 
             if valid and w_test:
-                w_sse, w_params = self.F2(res.crash, None, w_test, timestamps, prices, True)
-                lm_w = np.exp(self.get_log_lm_w(timestamps, res.crash, prices, res.params, w_params, w_sse)
-                              - self.get_log_lm_w(timestamps, res.crash, prices, res.params, res.params, res.SSE))
-                valid &= lm_w > 0.05
+                succeed, w_sse, w_params = self.F2(res.crash, None, w_test, timestamps, prices, True)
+                if succeed:
+                    lm_w = np.exp(self.get_log_lm_w(timestamps, res.crash, prices, res.params, w_params, w_sse)
+                                  - self.get_log_lm_w(timestamps, res.crash, prices, res.params, res.params, res.SSE))
+                    valid &= lm_w > 0.05
+                else:
+                    valid = False
 
             filter.append(valid)
             print("\rCalculating filter: {:.0f}%".format((counter + 1)/ len(results) * 100), end="")
@@ -326,17 +321,15 @@ class LPPLS_density():
 
 
 # data = pd.read_csv("../data/000001.SS.csv")
-sample_sizes = np.arange(100, 500, 25)
+sample_sizes = np.arange(100, 250, 50)
 lm_all = []
 keep_all = []
 density = LPPLS_density()
 for length in sample_sizes:
-    for length in sample_sizes:
-        data = get_history("bitcoinity_data.csv", "2017-05-25", delta_t=0, length=length, col="kraken")
-        F2s, Lm, ms, ws, Ds, tcs, keep = density.get_density(data.time.as_matrix(),
-                                                             data.price.as_matrix(),
-                                                             datetime.date(2017, 5, 25))
-    F2s, Lm, ms, ws, Ds, tcs, keep = density.get_density(data.time.as_matrix(), data.price.as_matrix())
+    data = get_history("bitcoinity_data.csv", "2017-05-25", delta_t=0, length=length, col="kraken")
+    F2s, Lm, ms, ws, Ds, tcs, keep = density.get_density(data.time.as_matrix(),
+                                                         data.price.as_matrix(),
+                                                         datetime.date(2017, 5, 25))
     lm_all.append(Lm)
     keep_all.append(keep)
 
