@@ -36,7 +36,9 @@ class LPPLSDensity:
         X3 = np.cos(w*X2)
         X4 = np.sin(w*X2)
         X = np.array([np.ones(len(t)),
-                      X1, X1*X3, X1*X4, X1*X2*( B + C1*X3 + C2*X4 ), X1*X2*(-C1*X4+C2*X3)])
+                      X1, X1*X3, X1*X4,
+                      X1*X2*(B + C1*X3 + C2*X4),
+                      X1*X2*(-C1*X4+C2*X3)])
 
         return X.T
 
@@ -164,10 +166,10 @@ class LPPLSDensity:
             return SSE
 
         # multiple starting points to mitigate local extrema
-        retries = 15
+        retries = 20
         counter = 0
         succeeds = 0
-        best_SSE = np.inf
+        best_sse = np.inf
 
         from scipy import optimize
 
@@ -179,8 +181,8 @@ class LPPLSDensity:
                     res = optimize.minimize(F1, x0=[w if m0 else m], method="Nelder-Mead", tol=1E-6)
                 else:
                     res = optimize.minimize(F1, x0=[m, w], method="Nelder-Mead", tol=1E-6)
-                if res.fun < best_SSE:
-                    best_SSE = res.fun
+                if res.fun < best_sse:
+                    best_sse = res.fun
                     if m0 or w0:
                         res.x = np.hstack([m0, res.x]) if m0 else np.hstack([res.x, w0])
                     params = res.x
@@ -200,8 +202,8 @@ class LPPLSDensity:
 
         if flag:
             _, ABCC = F1(params, True)
-            return True, best_SSE, np.hstack([ABCC, params])
-        return True, best_SSE
+            return True, best_sse, np.hstack([ABCC, params])
+        return True, best_sse
 
     # *********************************************
     # * full MLEs / Formula (14)
@@ -230,7 +232,7 @@ class LPPLSDensity:
         crash_times = np.arange(cob_date-10, cob_date+150) + 0.01
 
         print("------------------- ")
-        print("Length:", N, flush=True)
+        print("{} Delta:{} Length:{}".format(ref_date, delta_t, N), flush=True)
 
         # *********************************************
         # * evaluate density value at each crash time point

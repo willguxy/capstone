@@ -16,23 +16,25 @@ import datetime
 import shutil
 
 import plotly.offline as offline
-from plotly.graph_objs import Layout, Contour
+from plotly.graph_objs import Layout, Contour, Scatter
+
 
 np.seterr(all="raise")
 
 
 # data = pd.read_csv("../data/000001.SS.csv")
-sample_sizes = np.arange(100, 300, 25)
-cob_date = "2017-05-25"
-delta_t = 50
+sample_sizes = np.arange(100, 700, 25)
+cob_date = "2017-09-01"
+delta_t = 75
 lm_all = []
 keep_all = []
 density = LPPLSDensity()
 for length in sample_sizes:
-    data = get_history("bitcoinity_data.csv", cob_date, delta_t=0, length=length, col="kraken")
+    data = get_history("bitcoinity_data.csv", cob_date, delta_t=delta_t, length=length, col="kraken")
     F2s, Lm, ms, ws, Ds, tcs, keep = density.get_density(data.time.as_matrix(),
                                                          data.price.as_matrix(),
-                                                         datetime.date(2017, 5, 25), delta_t)
+                                                         datetime.datetime.strptime(cob_date, "%Y-%m-%d").date(),
+                                                         delta_t)
     lm_all.append(Lm)
     keep_all.append(keep)
 
@@ -63,14 +65,13 @@ offline.plot({
     # "layout": layout
 })
 
-shutil.move("temp-plot.html", "plot-" + cob_date + "-" + str(delta_t))
+shutil.copy("temp-plot.html", "plot-" + cob_date + "-d" + str(delta_t) + ".html")
 
 
 # fig = tools.make_subplots( rows=4, cols=1 )
 # fig.append_trace( Scatter(x=tcs, y=F2s), 1, 1 )
 # fig.append_trace( Scatter(x=tcs, y=Lm, name="Modified LP"), 2, 1 )
-# fig.append_trace( Scatter(x=tcs, y=Lmp, name="LP" ), 2, 1)
 # fig.append_trace( Scatter(x=tcs, y=ws), 3, 1)
 # fig.append_trace( Scatter(x=tcs, y=Ds), 4, 1)
-
+#
 # offline.plot( fig )
