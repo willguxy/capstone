@@ -14,18 +14,19 @@ import numpy as np
 
 import datetime
 import shutil
+import pickle
 
 import plotly.offline as offline
-from plotly.graph_objs import Layout, Contour, Scatter
+from plotly.graph_objs import Layout, Contour, Scatter, Figure
 
 
 np.seterr(all="raise")
 
 
 # data = pd.read_csv("../data/000001.SS.csv")
-sample_sizes = np.arange(100, 700, 25)
-cob_date = "2017-09-01"
-delta_t = 75
+sample_sizes = np.arange(100, 140, 25)
+cob_date = "2017-05-25"
+delta_t = 10
 lm_all = []
 keep_all = []
 density = LPPLSDensity()
@@ -57,21 +58,27 @@ filter_color = [
     [1, "rgb(0, 0, 255)"]
 ]
 
-offline.plot({
-    "data": [
-        Contour(z=lm_all, y=sample_sizes, x=tcs, colorscale=my_color),
-        Contour(z=keep_all, y=sample_sizes, x=tcs, colorscale=filter_color, opacity=0.5, contours=dict(showlines=False)),
-    ],
-    # "layout": layout
-})
+layout = Layout(
+    yaxis=dict(domain=[0.34, 1]),
+    yaxis2=dict(domain=[0, 0.30]),
+    shapes=[
+        {"x0": cob_date, "y0": sample_sizes[0], "x1": cob_date, "y1": sample_sizes[-1], "line": {"color": "red"}},
+        {"x0": tcs[9], "y0": sample_sizes[0], "x1": tcs[9], "y1": sample_sizes[-1], "line": {"color": "lime"}},
+    ]
+)
 
-shutil.copy("temp-plot.html", "plot-" + cob_date + "-d" + str(delta_t) + ".html")
+real_price = get_history("bitcoinity_data.csv", tcs[-1], delta_t=0, length=len(tcs), col="kraken")
 
+plots = list()
+plots.append(Contour(z=lm_all, y=sample_sizes, x=tcs, colorscale=my_color, showscale=False))
+plots.append(Contour(z=keep_all, y=sample_sizes, x=tcs, colorscale=filter_color, showscale=False,
+                     opacity=0.5, contours=dict(showlines=False)))
+plots.append(Scatter(y=real_price.price, x=tcs, yaxis="y2", name="Bitcoin", line=dict(color="black")))
 
-# fig = tools.make_subplots( rows=4, cols=1 )
-# fig.append_trace( Scatter(x=tcs, y=F2s), 1, 1 )
-# fig.append_trace( Scatter(x=tcs, y=Lm, name="Modified LP"), 2, 1 )
-# fig.append_trace( Scatter(x=tcs, y=ws), 3, 1)
-# fig.append_trace( Scatter(x=tcs, y=Ds), 4, 1)
-#
-# offline.plot( fig )
+fig = Figure(data=plots, layout=layout)
+
+offline.plot(fig)
+
+shutil.copy("temp-plot.html", "./output/plot-" + cob_date + "-d" + str(delta_t) + ".html")
+pickle.dump({"lm": lm_all, "size": sample_sizes, "time": tcs, "price": real_price, "keep": keep_all},
+            open("output/saved-" + cob_date + "-d" + str(delta_t) + ".pkl", "wb"))

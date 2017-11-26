@@ -8,12 +8,13 @@ import pandas as pd
 
 def get_history(filename="2017-06-11", end_date="", delta_t=50, length=150, col="price"):
     data = pd.read_csv("../data/" + filename, parse_dates=["Time"])
+    data["timestamp"] = data.Time
     data["price"] = data[col]
     data["time"] = np.arange(data.shape[0])
     data = data[data.Time <= end_date]
     if delta_t == 0:
-        return data[-length:][["time", "price"]]
-    return data[- delta_t -length: -delta_t][["time", "price"]]
+        return data[-length:][["time", "price", "timestamp"]]
+    return data[- delta_t -length: -delta_t][["time", "price", "timestamp"]]
 
 
 def simulate_lppls(delta_t):
