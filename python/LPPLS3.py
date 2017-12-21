@@ -24,9 +24,9 @@ np.seterr(all="raise")
 
 
 # data = pd.read_csv("../data/000001.SS.csv")
-sample_sizes = np.arange(100, 140, 25)
-cob_date = "2017-05-25"
-delta_t = 10
+sample_sizes = np.arange(100, 700, 10)
+cob_date = "2017-09-01"
+delta_t = 50
 lm_all = []
 keep_all = []
 density = LPPLSDensity()
