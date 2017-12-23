@@ -25,7 +25,7 @@ np.seterr(all="raise")
 
 sample_sizes = np.arange(100, 710, 25)
 cob_date = "2017-05-25"
-delta_t = 20
+delta_t = 0
 lm_all = []
 keep_all = []
 density = LPPLSDensity()
