@@ -7,7 +7,7 @@ Created on Sat Sep 30 23:05:34 2017
 Use synthetic data to unit test the code
 """
 
-from utils import get_history
+from utils import simulate_lppls
 from LPPLSDensity import LPPLSDensity
 
 import numpy as np
@@ -23,15 +23,14 @@ from plotly.graph_objs import Layout, Contour, Scatter, Figure
 np.seterr(all="raise")
 
 
-# data = pd.read_csv("../data/000001.SS.csv")
-sample_sizes = np.arange(100, 700, 10)
-cob_date = "2017-09-01"
-delta_t = 50
+sample_sizes = np.arange(100, 710, 25)
+cob_date = "2017-01-01"
+delta_t = 100
 lm_all = []
 keep_all = []
 density = LPPLSDensity()
 for length in sample_sizes:
-    data = get_history("bitcoinity_data.csv", cob_date, delta_t=delta_t, length=length, col="kraken")
+    data = simulate_lppls(delta_t, length)
     F2s, Lm, ms, ws, Ds, tcs, keep = density.get_density(data.time.as_matrix(),
                                                          data.price.as_matrix(),
                                                          datetime.datetime.strptime(cob_date, "%Y-%m-%d").date(),
@@ -67,7 +66,7 @@ layout = Layout(
     ]
 )
 
-real_price = get_history("bitcoinity_data.csv", tcs[-1], delta_t=0, length=len(tcs), col="kraken")
+real_price = simulate_lppls(delta_t=-150 + delta_t, length=len(tcs))
 
 plots = list()
 plots.append(Contour(z=lm_all, y=sample_sizes, x=tcs, colorscale=my_color, showscale=False))
@@ -79,6 +78,6 @@ fig = Figure(data=plots, layout=layout)
 
 offline.plot(fig)
 
-shutil.copy("temp-plot.html", "./output/plot-" + cob_date + "-d" + str(delta_t) + ".html")
+shutil.copy("temp-plot.html", "./simulation/plot-" + cob_date + "-d" + str(delta_t) + ".html")
 pickle.dump({"lm": lm_all, "size": sample_sizes, "time": tcs, "price": real_price, "keep": keep_all},
             open("output/saved-" + cob_date + "-d" + str(delta_t) + ".pkl", "wb"))

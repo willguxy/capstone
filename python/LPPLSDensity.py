@@ -214,7 +214,7 @@ class LPPLSDensity:
         counter = 0
         for crash in crash_times:
             succeed, SSE, params = self.get_f2(crash, None, None, t, Pt, True)
-            results.append(Result(crash,SSE,params))
+            results.append(Result(crash, SSE, params))
 
             if results[-1].sse < best_result.sse:
                 best_result = results[-1]
@@ -241,10 +241,10 @@ class LPPLSDensity:
         print("tc:", mle.crash, " | SSE:", mle.sse / N)
 
         log_Lm = []
-        F2s = [ res.sse for res in results ]
+        F2s = [res.sse for res in results]
         # ref_date = datetime.date(2015, 6, 12)
-        ms = [ res.params[4] for res in results ]
-        ws = [ res.params[5] for res in results ]
+        ms = [res.params[4] for res in results]
+        ws = [res.params[5] for res in results]
         Ds = []
         tcs = []
         filter = []
@@ -284,18 +284,18 @@ class LPPLSDensity:
             if valid and m_test:
                 succeed, m_sse, m_params = self.get_f2(res.crash, m_test, None, timestamps, prices, True)
                 if succeed:
-                    lm_m = np.exp(self.get_log_lm_m(timestamps, res.crash, prices, res.params, m_params, m_sse)
-                                  - self.get_log_lm_m(timestamps, res.crash, prices, res.params, res.params, res.sse))
-                    valid &= lm_m > 0.05
+                    lm_m = self.get_log_lm_m(timestamps, res.crash, prices, res.params, m_params, m_sse) \
+                                  - self.get_log_lm_m(timestamps, res.crash, prices, res.params, res.params, res.sse)
+                    valid &= lm_m > np.log(0.05)
                 else:
                     valid = False
 
             if valid and w_test:
                 succeed, w_sse, w_params = self.get_f2(res.crash, None, w_test, timestamps, prices, True)
                 if succeed:
-                    lm_w = np.exp(self.get_log_lm_w(timestamps, res.crash, prices, res.params, w_params, w_sse)
-                                  - self.get_log_lm_w(timestamps, res.crash, prices, res.params, res.params, res.sse))
-                    valid &= lm_w > 0.05
+                    lm_w = self.get_log_lm_w(timestamps, res.crash, prices, res.params, w_params, w_sse) \
+                                  - self.get_log_lm_w(timestamps, res.crash, prices, res.params, res.params, res.sse)
+                    valid &= lm_w > np.log(0.05)
                 else:
                     valid = False
 
