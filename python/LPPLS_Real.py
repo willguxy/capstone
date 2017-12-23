@@ -23,22 +23,9 @@ from plotly.graph_objs import Layout, Contour, Scatter, Figure
 np.seterr(all="raise")
 
 
-<<<<<<< HEAD:python/LPPLS_Real.py
-<<<<<<< HEAD:python/LPPLS_Real.py
 sample_sizes = np.arange(100, 710, 25)
 cob_date = "2017-05-25"
 delta_t = 20
-=======
-=======
->>>>>>> c4cf42cd690bc97923ba4f55012fc6013bc0f772:python/LPPLS3.py
-# data = pd.read_csv("../data/000001.SS.csv")
-sample_sizes = np.arange(100, 700, 10)
-cob_date = "2017-09-01"
-delta_t = 50
-<<<<<<< HEAD:python/LPPLS_Real.py
->>>>>>> c4cf42cd690bc97923ba4f55012fc6013bc0f772:python/LPPLS3.py
-=======
->>>>>>> c4cf42cd690bc97923ba4f55012fc6013bc0f772:python/LPPLS3.py
 lm_all = []
 keep_all = []
 density = LPPLSDensity()
